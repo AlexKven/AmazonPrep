@@ -1,0 +1,107 @@
+#include <string>
+#include <iostream>
+#include <pthread.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <stdio.h>
+#define NUM_THREADS 5
+
+using namespace std;
+
+void *PrintHello(void *threadid)
+{
+	long tid = (long)threadid;
+	cout << "Hello from " << tid << "!" << endl;
+	pthread_exit(NULL);
+}
+
+int connection_handler(int connection_fd)
+{
+ int nbytes;
+ char buffer[256];
+
+ nbytes = read(connection_fd, buffer, 256);
+ buffer[nbytes] = 0;
+
+ printf("MESSAGE FROM CLIENT: %s\n", buffer);
+ nbytes = snprintf(buffer, 256, "hello from the server");
+ write(connection_fd, buffer, nbytes);
+
+ close(connection_fd);
+ return 0;
+}
+
+int main(int argc, char **argv)
+{
+    pthread_t threads[NUM_THREADS];
+    int rc;
+    long t;
+    for(t=0; t<NUM_THREADS; t++)
+    {
+       cout << "In main: creating thread " << t << endl;
+       rc = pthread_create(&threads[t], NULL, PrintHello, (void *)t);
+       if (rc)
+       {
+          cout << "ERROR; return code from pthread_create() is " << rc << endl;
+          return -1;
+       }
+    }
+
+	 struct sockaddr_un address;
+	 int socket_fd, connection_fd;
+	 socklen_t address_length;
+	 pid_t child;
+	
+	 socket_fd = socket(PF_UNIX, SOCK_STREAM, 0);
+	 if(socket_fd < 0)
+	 {
+	  printf("socket() failed\n");
+	  return 1;
+	 } 
+	
+	 unlink("./demo_socket");
+	
+	 /* start with a clean address structure */
+	 memset(&address, 0, sizeof(struct sockaddr_un));
+	
+	 address.sun_family = AF_UNIX;
+	 snprintf(address.sun_path, UNIX_PATH_MAX, "./demo_socket");
+	
+	 if(bind(socket_fd, 
+	         (struct sockaddr *) &address, 
+	         sizeof(struct sockaddr_un)) != 0)
+	 {
+	  printf("bind() failed\n");
+	  return 1;
+	 }
+	
+	 if(listen(socket_fd, 5) != 0)
+	 {
+	  printf("listen() failed\n");
+	  return 1;
+	 }
+	
+	 while((connection_fd = accept(socket_fd, 
+	                               (struct sockaddr *) &address,
+	                               &address_length)) > -1)
+	 {
+	  child = fork();
+	  if(child == 0)
+	  {
+	   /* now inside newly created connection handling process */
+	   return connection_handler(connection_fd);
+	  }
+	
+	  /* still inside server process */
+	  close(connection_fd);
+	 }
+	
+	 close(socket_fd);
+ unlink("./demo_socket");
+
+    /* Last thing that main() should do */
+    pthread_exit(NULL);
+    return 0;
+}
